@@ -1,0 +1,213 @@
+package managers;
+
+import models.MenuItem;
+import models.Order;
+import models.OrderItem;
+import models.OrderStatus;
+
+import java.io.*;
+import java.time.LocalDateTime;
+import java.util.*;
+
+public class OrderManager {
+    private PriorityQueue<Order> pendingOrders;
+    private Map<String, List<Order>> orderHistory;  // Holds orders grouped by customerId
+    private PriorityQueue<Order> vipPendingOrders;
+    private static final String ORDER_HISTORY_FILE = "data/orders.txt";  // File to store order history
+
+    public OrderManager() {
+        this.pendingOrders = new PriorityQueue<>((o1, o2) -> o1.getOrderTime().compareTo(o2.getOrderTime()));
+        this.vipPendingOrders = new PriorityQueue<>((o1, o2) -> o1.getOrderTime().compareTo(o2.getOrderTime()));
+        this.orderHistory = new HashMap<>();
+        loadOrderHistory();  // Load order history on startup
+    }
+
+    // Method to place an order and save it
+    public void placeOrder(Order order, boolean isVIP) {
+        if (isVIP) {
+            vipPendingOrders.offer(order);
+        } else {
+            pendingOrders.offer(order);
+        }
+
+        orderHistory.computeIfAbsent(order.getCustomerId(), k -> new ArrayList<>()).add(order);
+        saveOrderHistory();  // Save the updated order history to file
+    }
+
+    // Save all orders to the file
+    private void saveOrderHistory() {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(ORDER_HISTORY_FILE))) {
+            for (List<Order> orders : orderHistory.values()) {
+                for (Order order : orders) {
+                    writer.write(orderToFileFormat(order));
+                    writer.newLine();
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving order history: " + e.getMessage());
+        }
+    }
+
+    // Load orders from the file into order history
+    private void loadOrderHistory() {
+        try (BufferedReader reader = new BufferedReader(new FileReader(ORDER_HISTORY_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                Order order = parseOrderFromFile(line);
+                orderHistory.computeIfAbsent(order.getCustomerId(), k -> new ArrayList<>()).add(order);
+            }
+        } catch (IOException e) {
+            System.err.println("Error loading order history: " + e.getMessage());
+        }
+    }
+
+    // Helper method to convert Order to file format string
+    private String orderToFileFormat(Order order) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(order.getOrderId()).append(",");
+        sb.append(order.getCustomerId()).append(",");
+        sb.append(order.getStatus()).append(",");
+        sb.append(order.getTotalAmount()).append(",");
+        sb.append(order.getOrderTime()).append(",");
+
+        // Add order items to the string
+        for (Map.Entry<MenuItem, OrderItem> entry : order.getItems().entrySet()) {
+            MenuItem item = entry.getKey();
+            OrderItem orderItem = entry.getValue();
+            sb.append(item.getName()).append(":");
+            sb.append(orderItem.getQuantity()).append(":");
+            sb.append(orderItem.getSpecialRequest() != null ? orderItem.getSpecialRequest() : "None").append(",");
+        }
+        return sb.toString();
+    }
+
+    // Helper method to parse Order from a file line
+    private Order parseOrderFromFile(String orderData) {
+        // Check if the data is null or empty
+        if (orderData == null || orderData.trim().isEmpty()) {
+            System.err.println("Skipping empty or null order data.");
+            return null;
+        }
+
+        String[] parts = orderData.split(",");
+
+        // Validate the number of parts
+        if (parts.length < 5) {
+            System.err.println("Malformed order data: " + orderData + ". Expected at least 5 parts, but got " + parts.length);
+            return null; // Skip invalid data
+        }
+
+        try {
+            // Parse mandatory fields
+            String orderId = parts[0];
+            String customerId = parts[1];
+            OrderStatus status;
+            try {
+                status = OrderStatus.valueOf(parts[2].toUpperCase()); // Ensure valid status
+            } catch (IllegalArgumentException e) {
+                System.err.println("Invalid status in order data: " + parts[2]);
+                status = OrderStatus.PENDING; // Default to PENDING if invalid status
+            }
+
+            double totalAmount = Double.parseDouble(parts[3]);
+            LocalDateTime orderTime = LocalDateTime.parse(parts[4]);
+
+            // Create the order
+            Order order = new Order(customerId);
+            order.setOrderId(orderId);
+            order.setStatus(status);
+            order.setTotalAmount(totalAmount);
+            order.setOrderTime(orderTime);
+
+            // Parse items
+            for (int i = 5; i < parts.length; i++) {
+                String[] itemParts = parts[i].split(":");
+                if (itemParts.length < 6) {
+                    System.err.println("Malformed order item data: " + parts[i] + ". Expected 6 parts, but got " + itemParts.length);
+                    continue; // Skip invalid item
+                }
+
+                // Extract item details
+                String itemId = itemParts[0];
+                String itemName = itemParts[1];
+                double itemPrice = Double.parseDouble(itemParts[2]);
+                String itemCategory = itemParts[3];
+                int quantity = Integer.parseInt(itemParts[4]);
+                String specialRequest = itemParts[5];
+
+                // Create MenuItem and add it to the order
+                MenuItem menuItem = new MenuItem(itemId, itemName, itemPrice, itemCategory);
+                order.addItem(menuItem, quantity, specialRequest);
+            }
+
+            return order;
+
+        } catch (Exception e) {
+            System.err.println("Error parsing order data: " + orderData + ". Error: " + e.getMessage());
+            return null; // Skip malformed orders
+        }
+    }
+
+    // Get all orders for all customers
+    public List<Order> getAllOrders() {
+        List<Order> allOrders = new ArrayList<>();
+        for (List<Order> orders : orderHistory.values()) {
+            allOrders.addAll(orders);  // Add all orders for each customer to the list
+        }
+        return allOrders;
+    }
+
+    // Get all orders for a specific customer
+    public List<Order> getCustomerHistory(String customerId) {
+        return orderHistory.getOrDefault(customerId, new ArrayList<>());
+    }
+
+    // Get all pending orders
+    public List<Order> getPendingOrders() {
+        List<Order> orders = new ArrayList<>();
+
+        PriorityQueue<Order> tempVipQueue = new PriorityQueue<>(vipPendingOrders);
+        while (!tempVipQueue.isEmpty()) {
+            orders.add(tempVipQueue.poll());
+        }
+
+        PriorityQueue<Order> tempQueue = new PriorityQueue<>(pendingOrders);
+        while (!tempQueue.isEmpty()) {
+            orders.add(tempQueue.poll());
+        }
+
+        return orders;
+    }
+
+    // Update order status
+    public void updateOrderStatus(String orderId, OrderStatus status) {
+        pendingOrders.removeIf(order -> {
+            if (order.getOrderId().equals(orderId)) {
+                order.setStatus(status);
+                if (status == OrderStatus.DELIVERED || status == OrderStatus.CANCELLED) {
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        orderHistory.values().forEach(orders ->
+                orders.stream()
+                        .filter(order -> order.getOrderId().equals(orderId))
+                        .forEach(order -> order.setStatus(status))
+        );
+    }
+
+    // Find an order by its ID
+    public Order findOrder(String orderId) {
+        for (List<Order> orders : orderHistory.values()) {
+            Optional<Order> found = orders.stream()
+                    .filter(order -> order.getOrderId().equals(orderId))
+                    .findFirst();
+            if (found.isPresent()) {
+                return found.get();
+            }
+        }
+        return null;
+    }
+}
