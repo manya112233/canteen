@@ -1,0 +1,70 @@
+package managers;
+
+import models.MenuItem;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class MenuManager {
+    private TreeMap<String, MenuItem> menuItems;
+
+    public MenuManager() {
+        this.menuItems = new TreeMap<>();
+    }
+
+    public void addItem(MenuItem item) {
+        menuItems.put(item.getId(), item);
+    }
+
+    public void removeItem(String id) {
+        menuItems.remove(id);
+    }
+
+    public void updatePrice(String id, double newPrice) {
+        if (menuItems.containsKey(id)) {
+            menuItems.get(id).setPrice(newPrice);
+        } else {
+            throw new IllegalArgumentException("Item not found: " + id);
+        }
+    }
+
+    public void updateAvailability(String id, boolean available) {
+        if (menuItems.containsKey(id)) {
+            menuItems.get(id).setAvailable(available);
+        } else {
+            throw new IllegalArgumentException("Item not found: " + id);
+        }
+    }
+
+    public MenuItem getItem(String id) {
+        return menuItems.get(id);
+    }
+
+    public Collection<MenuItem> getItemsByCategory(String category) {
+        return menuItems.values().stream()
+                .filter(item -> item.getCategory().equals(category))
+                .collect(Collectors.toList());
+    }
+
+    public Collection<MenuItem> getAllItems() {
+        return menuItems.values();
+    }
+
+    public Collection<MenuItem> getAvailableItems() {
+        return menuItems.values().stream()
+                .filter(MenuItem::isAvailable)
+                .collect(Collectors.toList());
+    }
+
+    public Collection<String> getCategories() {
+        return menuItems.values().stream()
+                .map(MenuItem::getCategory)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    public Collection<MenuItem> searchItems(String searchTerm) {
+        return menuItems.values().stream()
+                .filter(item -> item.getName().toLowerCase().contains(searchTerm.toLowerCase()))
+                .collect(Collectors.toList());
+    }
+}
